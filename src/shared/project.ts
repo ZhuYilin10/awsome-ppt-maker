@@ -1,3 +1,5 @@
+import type { AiRuntimeStatus, AiSettingsInput, AiSettingsSnapshot, ConnectionTestResult } from './ai';
+
 export type MaterialPurpose = 'primary' | 'content' | 'reference' | 'asset' | 'auto';
 export type SelectedMaterial = { id: string; sourcePath: string; name: string; size: number };
 export type Material = SelectedMaterial & { purpose: MaterialPurpose; note: string };
@@ -12,7 +14,7 @@ export type ProjectRecord = Omit<ProjectInput, 'materials' | 'id'> & {
   materials: StoredMaterial[];
 };
 export type ProjectSummary = Pick<ProjectRecord, 'id' | 'name' | 'updatedAt'> & { materialCount: number };
-export type RuntimeStatus = { officecli: { available: boolean; version?: string }; agent: 'Pi SDK' };
+export type RuntimeStatus = { officecli: { available: boolean; version?: string }; ai: AiRuntimeStatus };
 export interface DesktopAPI {
   selectMaterials(): Promise<SelectedMaterial[]>;
   importDroppedFiles(files: File[]): Promise<SelectedMaterial[]>;
@@ -21,5 +23,9 @@ export interface DesktopAPI {
   openProject(id: string): Promise<ProjectRecord>;
   analyzeProject(id: string): Promise<ProjectRecord>;
   revealProject(id: string): Promise<void>;
+  getAiSettings(): Promise<AiSettingsSnapshot>;
+  saveAiSettings(input: AiSettingsInput): Promise<AiSettingsSnapshot>;
+  testAiConnection(): Promise<ConnectionTestResult>;
+  clearAiCredential(): Promise<void>;
   runtimeStatus(): Promise<RuntimeStatus>;
 }

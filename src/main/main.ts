@@ -1,12 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ProjectInput } from '../shared/project';
 import { ProjectStore } from './project-store';
 import { analyzeOfficeFile, officeStatus } from './officecli';
+import { AiSettingsStore } from './ai-settings-store';
+import { PiRuntime } from './pi-runtime';
 
 let store: ProjectStore;
+let aiSettings: AiSettingsStore;
+let piRuntime: PiRuntime;
 const busyProjects = new Set<string>();
 const devURL = process.env.VITE_DEV_SERVER_URL;
 if (!app.isPackaged && process.env.PPT_PLAN_USER_DATA) app.setPath('userData', process.env.PPT_PLAN_USER_DATA);
@@ -37,6 +41,15 @@ app.whenReady().then(async () => {
   const dataPath = app.getPath('userData');
   await mkdir(dataPath, { recursive: true });
   store = new ProjectStore(join(dataPath, 'projects'), join(dataPath, 'projects.sqlite'));
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，无法安全保存 OpenAI API Key。');
+  const codec = {
+    encrypt: (value: string) => safeStorage.encryptString(value).toString('base64'),
+    decrypt: (value: string) => safeStorage.decryptString(Buffer.from(value, 'base64')),
+  };
+  aiSettings = new AiSettingsStore(dataPath, codec);
+  await aiSettings.load();
+  piRuntime = new PiRuntime(dataPath, aiSettings);
+  await piRuntime.initialize();
   const allowedURL = devURL ?? pathToFileURL(join(__dirname, '../../renderer/index.html')).href;
   function handle(channel: string, callback: (...args: any[]) => unknown) {
     ipcMain.handle(channel, (event, ...args) => {
@@ -72,12 +85,16 @@ app.whenReady().then(async () => {
       return record;
     } finally { busyProjects.delete(id); }
   });
-  handle('runtime:status', async () => ({ officecli: await officeStatus(), agent: 'Pi SDK' }));
+  handle('ai:get-settings', () => piRuntime.getSettings());
+  handle('ai:save-settings', (input) => piRuntime.save(input));
+  handle('ai:test-connection', () => piRuntime.testConnection());
+  handle('ai:clear-credential', () => piRuntime.clearCredential());
+  handle('runtime:status', async () => ({ officecli: await officeStatus(), ai: piRuntime.status() }));
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 }).catch((cause) => {
   dialog.showErrorBox('无法启动项目工作区', cause instanceof Error ? cause.message : String(cause));
   app.quit();
 });
-app.on('will-quit', () => store?.close());
+app.on('will-quit', () => { void piRuntime?.dispose(); store?.close(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -9,7 +9,8 @@ Electron 桌面 PPT 工作台。用代表页与用户反复确认设计，沉淀
 - 导入复制文件，原件不动；SQLite 项目索引和 JSON 项目记录。
 - 通过“最近项目”重新打开、继续修改说明，不重复创建项目。
 - OfficeCLI 基础统计、逐文件失败提示和重试。
-- Pi SDK 已加入依赖；**尚未接入对话、代表页 Plan、规范和全套制作**。
+- Pi Runtime 已接入 OpenAI Responses API reasoning 配置；可在“设置”页面保存和清除 OpenAI API Key、Base URL、Model ID 与 thinking level，并测试连接。
+- **尚未接入完整 Agent 对话、代表页 Plan、设计规范和全套制作**。
 
 ## 开发
 
@@ -38,6 +39,8 @@ npm run package:dir
 `dev` 启动真正的桌面窗口。浏览器只可预览界面，本地操作不会模拟成功。主进程代码修改需重启；React 页面支持热更新。
 
 资料位于 Electron `userData/projects`，索引在 `userData/projects.sqlite`。可从“项目目录”打开。
+
+AI 设置位于 Electron `userData/ai-settings.json`；API Key 单独使用系统安全存储加密，保存在 `ai-credential.bin`，不会进入项目 JSON、SQLite、renderer 或日志。当前 Provider 只有 OpenAI，使用 `openai-responses` 与 reasoning effort 协议。
 
 Electron 44 的运行时可能在首次启动时才下载。如安装包已装好但启动下载失败，可显式执行：
 

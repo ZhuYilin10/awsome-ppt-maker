@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectRecord, ProjectSummary, RuntimeStatus } from '../../shared/project';
+import Settings from './Settings';
 import {
   ArrowRight,
   Check,
@@ -13,6 +14,7 @@ import {
   LoaderCircle,
   Paperclip,
   Presentation,
+  Settings2,
   Sparkles,
   Trash2,
   Upload,
@@ -53,6 +55,7 @@ function App() {
   const [recent, setRecent] = useState<ProjectSummary[]>([]);
   const [showRecent, setShowRecent] = useState(false);
   const [analysisVisible, setAnalysisVisible] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [runtime, setRuntime] = useState<RuntimeStatus>();
   const [dragging, setDragging] = useState(false);
@@ -150,6 +153,8 @@ function App() {
     setDirty(false); setAnalysisVisible(false); setShowRecent(false); setError('');
   }
 
+  if (settingsVisible) return <main className="app-shell"><aside className="sidebar"><div className="brand-lockup"><div className="brand-mark"><Layers3 size={20} strokeWidth={2.4} /></div><div><div className="brand-name">PPT Plan</div><div className="brand-caption">STUDIO</div></div></div><div className="sidebar-section-label">工作区</div><nav className="workflow-nav" aria-label="工作区导航"><button className="workflow-item" onClick={() => setSettingsVisible(false)}><span className="workflow-number">01</span><span>项目材料</span></button><button className="workflow-item active"><Settings2 size={15} /><span>设置</span><span className="workflow-dot" /></button></nav><div className="sidebar-footnote"><Sparkles size={15} /><span>配置 Provider，<br />让 Agent 开始工作。</span></div></aside><section className="workspace"><Settings api={api} onBack={() => setSettingsVisible(false)} /></section></main>;
+
   return (
     <main className={`app-shell ${dragging ? 'dragging' : ''}`} onDragOver={(event) => { event.preventDefault(); if (api && !saving) setDragging(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={(event) => { event.preventDefault(); setDragging(false); if (!saving) void addMaterials(Array.from(event.dataTransfer.files)); }}>
       <input id="material-file-input" type="file" multiple hidden accept=".pptx,.docx,.xlsx,.pdf,.png,.jpg,.jpeg,.svg,.webp" onChange={(event) => { if (event.target.files && !saving) void addMaterials(Array.from(event.target.files)); event.target.value = ''; }} />
@@ -180,7 +185,7 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div className="breadcrumb"><span>项目</span><span className="breadcrumb-slash">/</span><strong>{project?.name ?? '新建项目'}</strong></div>
-          <div className="topbar-actions"><span className="local-badge"><span className="status-dot" />本地工作区</span><button className="text-button" onClick={newProject} disabled={!api || saving}>新建项目</button><button className="text-button" onClick={() => setShowRecent(!showRecent)} disabled={!api || saving}><FolderOpen size={17} />最近项目</button></div>
+          <div className="topbar-actions"><span className="local-badge"><span className="status-dot" />本地工作区</span><button className="text-button" onClick={() => setSettingsVisible(true)} disabled={!api || saving}><Settings2 size={16} />设置</button><button className="text-button" onClick={newProject} disabled={!api || saving}>新建项目</button><button className="text-button" onClick={() => setShowRecent(!showRecent)} disabled={!api || saving}><FolderOpen size={17} />最近项目</button></div>
         </header>
 
         <div className="content-scroll">
@@ -247,7 +252,7 @@ function App() {
               </div>
               <div className="aside-card rule-card"><div className="rule-icon"><Check size={15} /></div><div><strong>原文件不会被修改</strong><p>导入时复制到项目目录。用途与说明会进入项目记录，供后续 Agent 使用。</p></div></div>
               <div className="aside-note"><Sparkles size={14} /><span>主稿只能有一份。其他文件可以作为内容、参考或素材。</span></div>
-              <div className="runtime-note">OfficeCLI：{runtime ? runtime.officecli.available ? runtime.officecli.version : '未检测到，可先保存' : '检测中'}<br />Pi SDK 已加入工程；对话将在后续接入。</div>
+              <div className="runtime-note">OfficeCLI：{runtime ? runtime.officecli.available ? runtime.officecli.version : '未检测到，可先保存' : '检测中'}<br />AI Runtime：{runtime ? runtime.ai.runtimeReady ? runtime.ai.configured ? `OpenAI / ${runtime.ai.modelId}` : '未配置' : '不可用' : '检测中'}</div>
             </aside>
           </div>}
 

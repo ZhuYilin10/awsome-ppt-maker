@@ -9,6 +9,10 @@ const api: DesktopAPI = {
   openProject: (id) => ipcRenderer.invoke('project:open', id),
   analyzeProject: (id) => ipcRenderer.invoke('project:analyze', id),
   revealProject: (id) => ipcRenderer.invoke('project:reveal', id),
+  getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
+  saveAiSettings: (input) => ipcRenderer.invoke('ai:save-settings', input),
+  testAiConnection: () => ipcRenderer.invoke('ai:test-connection'),
+  clearAiCredential: () => ipcRenderer.invoke('ai:clear-credential'),
   runtimeStatus: () => ipcRenderer.invoke('runtime:status'),
 };
 contextBridge.exposeInMainWorld('pptPlan', api);

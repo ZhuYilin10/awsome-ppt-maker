@@ -79,6 +79,12 @@ try {
   await waitFor("Boolean(window.pptPlan && document.querySelector('#project-name'))");
   const runtime = await evaluate('window.pptPlan.runtimeStatus()');
   assert.equal(runtime.officecli.available, true);
+  await clickText('设置');
+  await waitFor("Boolean(document.querySelector('.settings-page'))");
+  assert.equal(await evaluate("document.querySelector('.provider-choice strong').textContent"), 'OpenAI');
+  assert.equal(await evaluate("document.querySelector('.settings-info').textContent.includes('reasoning.effort')"), true);
+  await clickText('返回项目');
+  await waitFor("Boolean(document.querySelector('#project-name'))");
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 960, deviceScaleFactor: 1, mobile: false });
   await mkdir('.impeccable/review', { recursive: true });
   await capture('desktop-empty.png');
