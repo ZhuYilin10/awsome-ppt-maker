@@ -56,6 +56,7 @@ export type AnalysisRunSnapshot = {
   currentTool?: string;
   agentRequestNumber?: number;
   agentRequestStartedAt?: string;
+  abortReason?: 'user' | 'app-dispose' | 'timeout' | 'tool-limit' | 'unknown';
   completedMaterials: number;
   totalMaterials: number;
   materialStates?: Record<string, { status: 'read' | 'error'; message?: string }>;

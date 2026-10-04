@@ -9,7 +9,7 @@ import { PiRuntime, type AgentRequestTiming } from './pi-runtime';
 import { ProjectStore } from './project-store';
 
 type Emit = (event: AnalysisEvent) => void;
-type RunContext = { snapshot: AnalysisRunSnapshot; controller: AbortController; emit: Emit; done?: Promise<ProjectRecord>; timedOut?: boolean; limitExceeded?: boolean; timeline: { time: string; type: AnalysisEvent['type']; tool?: string; materialId?: string; status: AnalysisRunSnapshot['status'] }[]; runRoot: string; logReady: Promise<void> };
+type RunContext = { snapshot: AnalysisRunSnapshot; controller: AbortController; emit: Emit; done?: Promise<ProjectRecord>; timedOut?: boolean; limitExceeded?: boolean; abortReason?: RunContext['snapshot']['abortReason']; timeline: { time: string; type: AnalysisEvent['type']; tool?: string; materialId?: string; status: AnalysisRunSnapshot['status'] }[]; runRoot: string; logReady: Promise<void> };
 const terminal = (status: AnalysisRunSnapshot['status']) => ['completed', 'failed', 'cancelled'].includes(status);
 async function atomicJson(path: string, value: unknown) {
   const temp = `${path}.${randomUUID()}.tmp`;
@@ -52,8 +52,8 @@ export class AnalysisRunner {
     return snapshot;
   }
   async run(projectId: string, emit: Emit) { this.start(projectId, emit); return this.runs.get(projectId)!.done!; }
-  async cancel(projectId: string) { const run = this.runs.get(projectId); run?.controller.abort(); await run?.done?.catch(() => undefined); }
-  async dispose() { await Promise.all([...this.runs.keys()].map((id) => this.cancel(id))); }
+  async cancel(projectId: string) { const run = this.runs.get(projectId); if (run) { run.abortReason = 'user'; run.controller.abort(); } await run?.done?.catch(() => undefined); }
+  async dispose() { await Promise.all([...this.runs.keys()].map(async (id) => { const run = this.runs.get(id); if (!run) return; run.abortReason = 'app-dispose'; run.controller.abort(); await run.done?.catch(() => undefined); })); }
   private update(context: RunContext, patch: Partial<AnalysisRunSnapshot>) { context.snapshot = { ...context.snapshot, ...patch, updatedAt: new Date().toISOString() }; }
   private publish(context: RunContext, type: AnalysisEvent['type'], extra: Omit<AnalysisEvent, 'type' | 'snapshot'> = {}) {
     const event = { time: new Date().toISOString(), type, tool: extra.tool, materialId: extra.materialId, status: context.snapshot.status };
@@ -78,7 +78,7 @@ export class AnalysisRunner {
     const analysisRoot = join(record.projectPath, 'analysis');
     const runRoot = join(analysisRoot, 'runs', runId);
     let submitted: ProjectAnalysis | undefined;
-    const timer = setTimeout(() => { context.timedOut = true; controller.abort(); }, 15 * 60_000);
+    const timer = setTimeout(() => { context.timedOut = true; context.abortReason = 'timeout'; controller.abort(); }, 15 * 60_000);
     const persistRun = async () => { await atomicJson(join(runRoot, 'run.json'), context.snapshot); await atomicJson(join(runRoot, 'timeline.json'), context.timeline); await atomicJson(join(analysisRoot, 'latest-run.json'), context.snapshot); };
     try {
       await mkdir(runRoot, { recursive: true });
@@ -110,7 +110,7 @@ export class AnalysisRunner {
         onSubmit: (result) => { submitted = result; this.update(context, { status: 'agent-synthesis', message: '校验综合判断' }); this.publish(context, 'stage-changed'); },
         onTool: (tool, phase, materialId) => {
           signal.throwIfAborted();
-          if (phase === 'started' && ++calls > 100) { context.limitExceeded = true; controller.abort(); throw new Error('分析工具调用超过限制。'); }
+           if (phase === 'started' && ++calls > 100) { context.limitExceeded = true; context.abortReason = 'tool-limit'; controller.abort(); throw new Error('分析工具调用超过限制。'); }
           this.update(context, { currentTool: phase === 'started' ? tool : undefined, currentMaterialId: materialId, currentMaterialName: materials.find((material) => material.id === materialId)?.name });
           this.publish(context, phase === 'started' ? 'tool-started' : 'tool-finished', { tool, materialId });
         },
@@ -168,7 +168,7 @@ export class AnalysisRunner {
     } catch (cause) {
       const cancelled = signal.aborted && !context.timedOut && !context.limitExceeded;
       const error = context.timedOut ? '分析超过 15 分钟，已中止；可以重试。' : context.limitExceeded ? '分析工具调用超过 100 次，已停止；可以重试。' : cancelled ? '分析已取消。' : this.pi.safeError(cause);
-      this.update(context, { status: cancelled ? 'cancelled' : 'failed', completedAt: new Date().toISOString(), error, message: error, currentTool: undefined });
+       this.update(context, { status: cancelled ? 'cancelled' : 'failed', completedAt: new Date().toISOString(), error, message: error, currentTool: undefined, abortReason: context.abortReason ?? (signal.aborted ? 'unknown' : undefined) });
       await persistRun().catch(() => undefined);
       this.publish(context, cancelled ? 'run-cancelled' : 'run-failed');
       throw new Error(error);
