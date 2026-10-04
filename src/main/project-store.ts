@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { copyFile, mkdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import type { ProjectInput, ProjectRecord, ProjectSummary, SelectedMaterial, StoredMaterial } from '../shared/project';
@@ -57,7 +58,12 @@ export class ProjectStore {
     if (typeof id !== 'string') throw new Error('无效的项目。');
     const row = this.db.prepare('SELECT record FROM projects WHERE id = ?').get(id);
     if (!row) throw new Error('项目不存在，请从最近项目中重新打开。');
-    return JSON.parse(row.record as string);
+    const record: ProjectRecord = JSON.parse(row.record as string);
+    if (!record.analysis && record.analysisRef && /^[a-f0-9-]{36}$/i.test(record.analysisRef.runId)) {
+      try { record.analysis = JSON.parse(readFileSync(join(record.projectPath, 'analysis', 'runs', record.analysisRef.runId, 'result.json'), 'utf8')); }
+      catch (cause) { if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause; }
+    }
+    return record;
   }
 
   async save(input: ProjectInput): Promise<ProjectRecord> {
@@ -88,6 +94,11 @@ export class ProjectStore {
       }
       const now = new Date().toISOString();
       const record: ProjectRecord = { id, name: input.name.trim(), brief: input.brief, createdAt: previous?.createdAt ?? now, updatedAt: now, projectPath, materials };
+      // Preserve valid previous results on an unchanged save (including retries).
+      if (previous && previous.name === record.name && previous.brief === record.brief && JSON.stringify(previous.materials.map(({ id, purpose, note }) => ({ id, purpose, note }))) === JSON.stringify(materials.map(({ id, purpose, note }) => ({ id, purpose, note })))) {
+        record.analysis = previous.analysis;
+        record.representativeSelection = previous.representativeSelection;
+      }
       // Validate again using trusted file names, not renderer-supplied metadata.
       validateProject(record);
       await this.persist(record);
@@ -100,11 +111,33 @@ export class ProjectStore {
   }
 
   async persist(record: ProjectRecord) {
-    const json = JSON.stringify(record, null, 2);
+    const { analysis, ...stored } = record;
+    if (analysis) {
+      if (!/^[a-f0-9-]{36}$/i.test(analysis.runId)) throw new Error('分析运行 ID 无效。');
+      const runRoot = join(record.projectPath, 'analysis', 'runs', analysis.runId);
+      await mkdir(runRoot, { recursive: true });
+      const resultTemp = join(runRoot, `result.${randomUUID()}.tmp`);
+      await writeFile(resultTemp, JSON.stringify(analysis, null, 2), 'utf8');
+      await rename(resultTemp, join(runRoot, 'result.json'));
+      stored.analysisRef = { runId: analysis.runId, status: analysis.status, completedAt: analysis.completedAt };
+    } else delete stored.analysisRef;
+    const json = JSON.stringify(stored, null, 2);
     const temp = join(record.projectPath, 'project.json.tmp');
+    await mkdir(record.projectPath, { recursive: true });
     await writeFile(temp, json, 'utf8');
     await rename(temp, join(record.projectPath, 'project.json'));
     this.db.prepare('INSERT INTO projects (id, name, updated_at, record) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at, record=excluded.record').run(record.id, record.name, record.updatedAt, json);
+  }
+
+  async saveRepresentativePages(id: string, pageNumbers: number[]) {
+    const record = this.get(id);
+    if (!record.analysis || record.analysis.status !== 'completed') throw new Error('请先完成材料分析。');
+    const candidates = new Set(record.analysis.representativePages.map((page) => page.pageNumber));
+    if (!Array.isArray(pageNumbers) || !pageNumbers.length || pageNumbers.length > 12 || new Set(pageNumbers).size !== pageNumbers.length || pageNumbers.some((page) => !Number.isInteger(page) || !candidates.has(page))) throw new Error('请选择有效的代表页候选。');
+    record.representativeSelection = { runId: record.analysis.runId, pageNumbers, confirmedAt: new Date().toISOString() };
+    record.updatedAt = record.representativeSelection.confirmedAt;
+    await this.persist(record);
+    return record;
   }
 
   close() { this.db.close(); }

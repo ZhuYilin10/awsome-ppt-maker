@@ -120,6 +120,7 @@ try {
   await capture('desktop-compact.png');
   await clickText('保存并分析材料');
   await waitFor("Boolean(document.querySelector('.analysis-panel'))");
+  await waitFor("document.querySelector('.analysis-status')?.textContent === '统计完成'");
   assert.equal(await evaluate("document.querySelector('.analysis-status').textContent"), '统计完成');
   const projects = await evaluate('window.pptPlan.listProjects()');
   assert.equal(projects.length, 1);

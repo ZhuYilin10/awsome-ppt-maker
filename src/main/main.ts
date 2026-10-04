@@ -1,16 +1,19 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ProjectInput } from '../shared/project';
 import { ProjectStore } from './project-store';
-import { analyzeOfficeFile, officeStatus } from './officecli';
+import { officeStatus } from './officecli';
 import { AiSettingsStore } from './ai-settings-store';
 import { PiRuntime } from './pi-runtime';
+import { AnalysisRunner } from './analysis-runner';
+import type { AnalysisEvent } from '../shared/analysis';
 
 let store: ProjectStore;
 let aiSettings: AiSettingsStore;
 let piRuntime: PiRuntime;
+let analysisRunner: AnalysisRunner;
 const busyProjects = new Set<string>();
 const devURL = process.env.VITE_DEV_SERVER_URL;
 if (!app.isPackaged && process.env.PPT_PLAN_USER_DATA) app.setPath('userData', process.env.PPT_PLAN_USER_DATA);
@@ -50,6 +53,10 @@ app.whenReady().then(async () => {
   await aiSettings.load();
   piRuntime = new PiRuntime(dataPath, aiSettings);
   await piRuntime.initialize();
+  analysisRunner = new AnalysisRunner(store, piRuntime);
+  const emitAnalysis = (event: AnalysisEvent) => {
+    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('project:analysis-event', event);
+  };
   const allowedURL = devURL ?? pathToFileURL(join(__dirname, '../../renderer/index.html')).href;
   function handle(channel: string, callback: (...args: any[]) => unknown) {
     ipcMain.handle(channel, (event, ...args) => {
@@ -66,7 +73,7 @@ app.whenReady().then(async () => {
   });
   handle('materials:drop', (paths: string[]) => store.select(paths));
   handle('project:save', async (input: ProjectInput) => {
-    if (input?.id && busyProjects.has(input.id)) throw new Error('材料分析中，请稍后再保存。');
+    if (input?.id && (busyProjects.has(input.id) || analysisRunner.isBusy(input.id))) throw new Error('材料分析中，请稍后再保存。');
     if (input?.id) busyProjects.add(input.id);
     try { return await store.save(input); }
     finally { if (input?.id) busyProjects.delete(input.id); }
@@ -76,26 +83,54 @@ app.whenReady().then(async () => {
   handle('project:reveal', (id: string) => { shell.showItemInFolder(join(store.get(id).projectPath, 'project.json')); });
   handle('project:analyze', async (id: string) => {
     if (busyProjects.has(id)) throw new Error('该项目正在分析，请等待本轮结束。');
-    const record = store.get(id);
+    return analysisRunner.run(id, emitAnalysis);
+  });
+  handle('project:analysis-start', (id: string) => {
+    if (busyProjects.has(id)) throw new Error('项目正在保存，请稍后再分析。');
+    return analysisRunner.start(id, emitAnalysis);
+  });
+  handle('project:analysis-cancel', (id: string) => analysisRunner.cancel(id));
+  handle('project:analysis-run', (id: string) => analysisRunner.getRun(id));
+  handle('project:analysis-result', (id: string) => analysisRunner.getResult(id));
+  handle('project:representative-save', async (id: string, pages: number[]) => {
+    if (busyProjects.has(id) || analysisRunner.isBusy(id)) throw new Error('材料分析中，请稍后再确认。');
     busyProjects.add(id);
+    try { return await store.saveRepresentativePages(id, pages); }
+    finally { busyProjects.delete(id); }
+  });
+  handle('project:representative-preview', async (id: string, pageNumber: number) => {
+    const record = store.get(id);
+    const candidate = record.analysis?.representativePages.find((page) => page.pageNumber === pageNumber);
+    if (!candidate || !/^[a-f0-9-]{36}$/i.test(record.analysis!.runId) || !/^[a-f0-9-]{36}$/i.test(candidate.materialId)) return undefined;
     try {
-      for (const material of record.materials) material.analysis = await analyzeOfficeFile(material.localPath);
-      record.updatedAt = new Date().toISOString();
-      await store.persist(record);
-      return record;
-    } finally { busyProjects.delete(id); }
+      const bytes = await readFile(join(record.projectPath, 'analysis', 'runs', record.analysis!.runId, 'previews', `${candidate.materialId}-${pageNumber}.png`));
+      if (bytes.byteLength > 4 * 1024 * 1024) return undefined;
+      return `data:image/png;base64,${bytes.toString('base64')}`;
+    } catch { return undefined; }
   });
   handle('ai:get-settings', () => piRuntime.getSettings());
-  handle('ai:save-settings', (input) => piRuntime.save(input));
+  handle('ai:save-settings', (input) => {
+    if (analysisRunner.hasActiveRuns()) throw new Error('材料分析中，请结束分析后修改设置。');
+    return piRuntime.save(input);
+  });
   handle('ai:fetch-models', (input) => piRuntime.fetchModels(input));
   handle('ai:test-connection', () => piRuntime.testConnection());
-  handle('ai:clear-credential', () => piRuntime.clearCredential());
+  handle('ai:clear-credential', () => {
+    if (analysisRunner.hasActiveRuns()) throw new Error('材料分析中，请结束分析后清除凭据。');
+    return piRuntime.clearCredential();
+  });
   handle('runtime:status', async () => ({ officecli: await officeStatus(), ai: piRuntime.status() }));
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 }).catch((cause) => {
   dialog.showErrorBox('无法启动项目工作区', cause instanceof Error ? cause.message : String(cause));
   app.quit();
+});
+let quitting = false;
+app.on('before-quit', (event) => {
+  if (quitting || !analysisRunner?.hasActiveRuns()) return;
+  event.preventDefault();
+  void analysisRunner.dispose().finally(() => { quitting = true; app.quit(); });
 });
 app.on('will-quit', () => { void piRuntime?.dispose(); store?.close(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectRecord, ProjectSummary, RuntimeStatus } from '../../shared/project';
+import type { AnalysisRunSnapshot } from '../../shared/analysis';
 import Settings from './Settings';
+import AnalysisPanel from './AnalysisPanel';
 import {
   ArrowRight,
   Check,
@@ -48,7 +50,7 @@ function App() {
   const [projectName, setProjectName] = useState('');
   const [brief, setBrief] = useState('');
   const [materials, setMaterials] = useState<Material[]>([]);
-  const [saving, setSaving] = useState(false);
+  const [isSaving, setSaving] = useState(false);
   const [savedPath, setSavedPath] = useState('');
   const [error, setError] = useState('');
   const [project, setProject] = useState<ProjectRecord>();
@@ -58,12 +60,24 @@ function App() {
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [runtime, setRuntime] = useState<RuntimeStatus>();
+  const [analysisRun, setAnalysisRun] = useState<AnalysisRunSnapshot>();
   const [dragging, setDragging] = useState(false);
   const operationPending = useRef(false);
+  const projectIdRef = useRef<string>();
+  projectIdRef.current = project?.id;
 
   useEffect(() => {
     if (!api) return;
     void Promise.all([api.listProjects(), api.runtimeStatus()]).then(([items, status]) => { setRecent(items); setRuntime(status); }).catch((cause) => setError(String(cause)));
+    return api.onAnalysisEvent((event) => {
+      if (event.snapshot.projectId !== projectIdRef.current) return;
+      setAnalysisRun(event.snapshot);
+      if (event.type === 'run-failed' || event.type === 'run-cancelled') setError(event.message ?? event.snapshot.error ?? '材料分析未完成。');
+      if (event.type === 'run-completed' || event.type === 'material-finished') void api.openProject(event.snapshot.projectId).then((record) => {
+        setProject((current) => current?.id === record.id ? record : current);
+        if (event.type === 'run-completed') setError('');
+      }).catch(() => undefined);
+    });
   }, [api]);
 
   useEffect(() => {
@@ -76,6 +90,8 @@ function App() {
 
   const primaryCount = useMemo(() => materials.filter((material) => material.purpose === 'primary').length, [materials]);
   const canContinue = projectName.trim().length > 1 && materials.length > 0 && primaryCount === 1;
+  const analysisBusy = Boolean(analysisRun && !['completed', 'failed', 'cancelled'].includes(analysisRun.status));
+  const saving = isSaving || analysisBusy;
 
   async function addMaterials(files?: File[]) {
     setError('');
@@ -121,11 +137,16 @@ function App() {
     setSaving(true);
     setError('');
     try {
-      let record = await api.saveProject({ id: project?.id, name: projectName.trim(), brief: brief.trim(), materials });
+      const record = await api.saveProject({ id: project?.id, name: projectName.trim(), brief: brief.trim(), materials });
       setProject(record);
+      projectIdRef.current = record.id;
       setSavedPath(record.projectPath);
       setDirty(false);
-      if (analyze) { record = await api.analyzeProject(record.id); setProject(record); setAnalysisVisible(true); }
+      if (analyze) {
+        setAnalysisVisible(true);
+        const run = await api.startProjectAnalysis(record.id);
+        setAnalysisRun((current) => current?.runId === run.runId ? current : run);
+      }
       setRecent(await api.listProjects());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '项目保存失败，请重试。');
@@ -142,14 +163,15 @@ function App() {
     try {
       const record = await api.openProject(id);
       setProject(record); setProjectName(record.name); setBrief(record.brief); setMaterials(record.materials);
-      setSavedPath(record.projectPath); setDirty(false); setShowRecent(false); setAnalysisVisible(false); setError('');
+      const run = await api.getAnalysisRun(record.id);
+      setSavedPath(record.projectPath); setDirty(false); setShowRecent(false); setAnalysisVisible(Boolean(record.analysis || (run && !['completed', 'failed', 'cancelled'].includes(run.status)))); setAnalysisRun(run); setError('');
     } catch (cause) { setError(String(cause)); } finally { operationPending.current = false; }
   }
 
   function newProject() {
     if (saving || operationPending.current) return;
     if (dirty && !window.confirm('有修改未保存，是否放弃修改并新建项目？')) return;
-    setProject(undefined); setProjectName(''); setBrief(''); setMaterials([]); setSavedPath('');
+    setProject(undefined); setProjectName(''); setBrief(''); setMaterials([]); setSavedPath(''); setAnalysisRun(undefined);
     setDirty(false); setAnalysisVisible(false); setShowRecent(false); setError('');
   }
 
@@ -169,8 +191,8 @@ function App() {
 
         <div className="sidebar-section-label">工作流</div>
         <nav className="workflow-nav" aria-label="项目工作流">
-          <button className="workflow-item active" onClick={() => setAnalysisVisible(false)}><span className="workflow-number">01</span><span>导入材料</span><span className="workflow-dot" /></button>
-           <button className="workflow-item" disabled><span className="workflow-number">02</span><span>选择代表页</span></button>
+           <button className={`workflow-item ${!analysisVisible ? 'active' : ''}`} onClick={() => setAnalysisVisible(false)}><span className="workflow-number">01</span><span>导入材料</span>{!analysisVisible && <span className="workflow-dot" />}</button>
+            <button className={`workflow-item ${analysisVisible ? 'active' : ''}`} disabled={project?.analysis?.status !== 'completed' || dirty || analysisBusy} onClick={() => setAnalysisVisible(true)}><span className="workflow-number">02</span><span>选择代表页</span>{analysisVisible && <span className="workflow-dot" />}</button>
            <button className="workflow-item" disabled><span className="workflow-number">03</span><span>代表页 Plan</span></button>
            <button className="workflow-item" disabled><span className="workflow-number">04</span><span>设计规范</span></button>
            <button className="workflow-item" disabled><span className="workflow-number">05</span><span>整套制作</span></button>
@@ -194,13 +216,13 @@ function App() {
           {showRecent && <section className="recent-panel"><h2>最近项目</h2>{recent.length ? recent.map((item) => <button className="recent-item" key={item.id} onClick={() => openProject(item.id)}><span>{item.name}</span><small>{item.materialCount} 份材料 · {new Date(item.updatedAt).toLocaleDateString('zh-CN')}</small><ArrowRight size={16} /></button>) : <p>还没有已保存项目。</p>}</section>}
           <div className="intro-row">
             <div>
-              <h1>先把材料交给 Agent。</h1>
-              <p className="intro-copy">告诉它每份文件该怎么用。说明越具体，后面生成的设计规范越贴近你的真实意图。</p>
+              <h1>{analysisVisible ? '读懂材料，再确定代表页。' : '先把材料交给 Agent。'}</h1>
+              <p className="intro-copy">{analysisVisible ? '查看材料判断与证据，选择能覆盖不同内容结构的页面。' : '告诉它每份文件该怎么用。说明越具体，后面生成的设计规范越贴近你的真实意图。'}</p>
             </div>
-            <div className="stage-mark"><span>PLAN</span><span className="stage-line" /><span>01</span></div>
+            <div className="stage-mark"><span>PLAN</span><span className="stage-line" /><span>{analysisVisible ? '02' : '01'}</span></div>
           </div>
 
-          {analysisVisible ? <section className="analysis-panel"><div className="section-heading"><div><h2>材料基础分析</h2><p>真实的 OfficeCLI 结构统计；代表页推荐和 AI 分析将在下一阶段接入。</p></div><button className="text-button" onClick={() => setAnalysisVisible(false)}>返回修改材料</button></div>{project?.materials.map((file) => <article className="analysis-item" key={file.id}><div className="material-topline"><strong>{file.name}</strong><span className={`analysis-status ${file.analysis?.status}`}>{file.analysis?.status === 'analyzed' ? '统计完成' : file.analysis?.status === 'error' ? '分析失败' : '待识别'}</span></div><p>{purposeLabels[file.purpose].label}{file.note && ` · ${file.note}`}</p>{file.analysis?.summary && <details><summary>查看统计结果</summary><pre>{file.analysis.summary}</pre></details>}{file.analysis?.message && <p className={file.analysis.status === 'error' ? 'error-text' : ''}>{file.analysis.message}</p>}</article>)}<p className="field-hint">此版本暂未生成代表页或设计规范。</p></section> : (
+           {analysisVisible ? <AnalysisPanel project={project} run={analysisRun} busy={analysisBusy || dirty} api={api} onSaved={setProject} onBack={() => setAnalysisVisible(false)} onCancel={() => { if (project) void api?.cancelProjectAnalysis(project.id).catch((cause) => setError(String(cause))); }} /> : (
             <section className="setup-main">
               <div className="section-heading"><div><h2>项目基本信息</h2><p>这是 Agent 在整个项目中都会看到的背景。</p></div><Info size={17} /></div>
               <div className="field-group">
@@ -261,7 +283,7 @@ function App() {
 
           <footer className="action-bar">
             <div className="action-status" aria-live="polite">{error ? <span className="error-text" role="alert">{error}</span> : dirty && savedPath ? '有修改尚未保存' : savedPath ? <span className="success-text"><Check size={15} />项目已保存到本机</span> : materials.length && primaryCount !== 1 ? '请选择一份 PPTX 主稿' : <span><span className="status-dot muted" />准备好后开始分析</span>}</div>
-            <div className="footer-actions">{project && <button className="text-button" disabled={saving} onClick={() => { void api?.revealProject(project.id).catch((cause) => setError(String(cause))); }}><FolderOpen size={16} />项目目录</button>}<button className="secondary-action" disabled={!api || !canContinue || saving} onClick={() => createProject(false)}>保存项目</button><button className="primary-action" disabled={!api || !canContinue || saving} onClick={() => createProject(true)}>{saving ? <><LoaderCircle size={17} className="spin" />正在保存与分析</> : <>保存并分析材料 <ArrowRight size={17} /></>}</button></div>
+             <div className="footer-actions">{project && <button className="text-button" disabled={isSaving} onClick={() => { void api?.revealProject(project.id).catch((cause) => setError(String(cause))); }}><FolderOpen size={16} />项目目录</button>}{analysisBusy && <button className="secondary-action" onClick={() => { if (project) void api?.cancelProjectAnalysis(project.id).catch((cause) => setError(String(cause))); }}>取消分析</button>}<button className="secondary-action" disabled={!api || !canContinue || saving} onClick={() => createProject(false)}>保存项目</button><button className="primary-action" disabled={!api || !canContinue || saving} onClick={() => createProject(true)}>{saving ? <><LoaderCircle size={17} className="spin" />{analysisBusy ? 'Agent 正在分析' : '正在保存'}</> : <>保存并分析材料 <ArrowRight size={17} /></>}</button></div>
           </footer>
             </aside>
         </div>

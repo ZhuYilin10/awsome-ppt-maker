@@ -1,4 +1,5 @@
 import type { AiModelOption, AiRuntimeStatus, AiSettingsInput, AiSettingsSnapshot, ConnectionTestResult } from './ai';
+import type { AnalysisEvent, AnalysisRunSnapshot, ProjectAnalysis } from './analysis';
 
 export type MaterialPurpose = 'primary' | 'content' | 'reference' | 'asset' | 'auto';
 export type SelectedMaterial = { id: string; sourcePath: string; name: string; size: number };
@@ -12,6 +13,9 @@ export type ProjectRecord = Omit<ProjectInput, 'materials' | 'id'> & {
   updatedAt: string;
   projectPath: string;
   materials: StoredMaterial[];
+  analysis?: ProjectAnalysis;
+  analysisRef?: { runId: string; status: ProjectAnalysis['status']; completedAt?: string };
+  representativeSelection?: { runId: string; pageNumbers: number[]; confirmedAt: string };
 };
 export type ProjectSummary = Pick<ProjectRecord, 'id' | 'name' | 'updatedAt'> & { materialCount: number };
 export type RuntimeStatus = { officecli: { available: boolean; version?: string }; ai: AiRuntimeStatus };
@@ -29,4 +33,11 @@ export interface DesktopAPI {
   testAiConnection(): Promise<ConnectionTestResult>;
   clearAiCredential(): Promise<void>;
   runtimeStatus(): Promise<RuntimeStatus>;
+  startProjectAnalysis(id: string): Promise<AnalysisRunSnapshot>;
+  cancelProjectAnalysis(id: string): Promise<void>;
+  getAnalysisRun(id: string): Promise<AnalysisRunSnapshot | undefined>;
+  getProjectAnalysis(id: string): Promise<ProjectAnalysis | undefined>;
+  onAnalysisEvent(listener: (event: AnalysisEvent) => void): () => void;
+  saveRepresentativePages(id: string, pageNumbers: number[]): Promise<ProjectRecord>;
+  getRepresentativePreview(id: string, pageNumber: number): Promise<string | undefined>;
 }

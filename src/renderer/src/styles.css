@@ -258,6 +258,25 @@ input::placeholder, textarea::placeholder { color: #707b87; }
 @media (max-width: 700px) { .settings-page { padding: 30px 5%; } .reasoning-options { grid-template-columns: repeat(2, 1fr); } .settings-actions { align-items: flex-start; flex-direction: column; } .settings-side { grid-template-columns: 1fr; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.analysis-progress { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 22px 0; padding: 20px; border: 1px solid #dce1f5; background: #f0f2ff; border-radius: 6px; }
+.analysis-progress > div { min-width: 0; }
+.analysis-progress strong { color: #3646ac; font-size: 14px; }
+.analysis-progress p { margin: 8px 0; font-size: 12px; line-height: 1.6; }
+.analysis-progress small { color: #536172; overflow-wrap: anywhere; }
+.analysis-progress button { flex-shrink: 0; }
+.analysis-report { margin-bottom: 30px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.analysis-report h3, .representative-pages h3 { font-size: 16px; margin: 0 0 12px; }
+.analysis-report p, .analysis-item p, .analysis-item li { line-height: 1.8; white-space: pre-wrap; }
+.analysis-item small { display: block; color: #647184; font-size: 11px; line-height: 1.8; }
+.analysis-item h4 { margin: 18px 0 5px; font-size: 12px; }
+.analysis-item ul { padding-left: 18px; font-size: 12px; }
+.representative-pages { margin-bottom: 32px; }
+.analysis-item .material-topline strong { overflow-wrap: anywhere; min-width: 0; }
+.analysis-item .analysis-status { flex-shrink: 0; }
+.candidate-heading { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.candidate-heading input { width: 18px; height: 18px; accent-color: var(--blue); }
+.candidate-preview { display: block; width: 100%; max-height: 400px; object-fit: contain; margin: 16px 0; background: #eef0f3; border: 1px solid var(--line); }
+
 @media (max-width: 1220px) {
   .content-scroll { padding-left: 5%; padding-right: 5%; }
   .setup-grid { gap: 34px; grid-template-columns: minmax(0, 1fr) 248px; }

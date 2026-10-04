@@ -8,7 +8,7 @@ import type { MaterialAnalysis } from '../shared/project';
 const exec = promisify(execFile);
 let resolvedBinary: string | undefined;
 
-async function binary() {
+export async function officeBinary() {
   if (resolvedBinary) return resolvedBinary;
   // Desktop apps launched from Finder do not inherit the interactive shell PATH.
   const candidates = [process.env.OFFICECLI_PATH, join(homedir(), '.local/bin/officecli'), '/opt/homebrew/bin/officecli', '/usr/local/bin/officecli', 'officecli'];
@@ -26,9 +26,19 @@ async function binary() {
 
 export async function officeStatus() {
   try {
-    const { stdout } = await exec(await binary(), ['--version'], { timeout: 10_000 });
+    const { stdout } = await exec(await officeBinary(), ['--version'], { timeout: 10_000 });
     return { available: true, version: stdout.trim() };
   } catch { return { available: false }; }
+}
+
+export async function runOfficeCli(args: string[], options: { timeout?: number; maxBuffer?: number; signal?: AbortSignal } = {}) {
+  const { stdout } = await exec(await officeBinary(), args, {
+    timeout: options.timeout ?? 120_000,
+    maxBuffer: options.maxBuffer ?? 8 * 1024 * 1024,
+    signal: options.signal,
+    env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' },
+  });
+  return stdout;
 }
 
 export async function analyzeOfficeFile(localPath: string): Promise<MaterialAnalysis> {
@@ -36,11 +46,7 @@ export async function analyzeOfficeFile(localPath: string): Promise<MaterialAnal
     return { status: 'skipped', message: '文件已保存；PDF 和图片的内容识别将在 Agent 阶段接入。' };
   }
   try {
-    const { stdout } = await exec(await binary(), ['view', localPath, 'stats', '--json'], {
-      timeout: 120_000,
-      maxBuffer: 4 * 1024 * 1024,
-      env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1' },
-    });
+    const stdout = await runOfficeCli(['view', localPath, 'stats', '--json'], { maxBuffer: 4 * 1024 * 1024 });
     // Retain the actual tool result; do not fabricate slide counts or semantic analysis.
     const result: unknown = JSON.parse(stdout);
     return { status: 'analyzed', summary: JSON.stringify(result, null, 2) };

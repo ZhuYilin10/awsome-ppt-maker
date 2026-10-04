@@ -1,8 +1,8 @@
-import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import type { AgentSession, ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AiModelOption, AiRuntimeStatus, AiSettingsInput, AiSettingsSnapshot, ConnectionTestResult, ThinkingLevel } from '../shared/ai';
-import { AiSettingsStore, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL, DEFAULT_THINKING_LEVEL, validateAiSettings, validateBaseUrl } from './ai-settings-store';
+import { AiSettingsStore, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL, validateAiSettings, validateBaseUrl } from './ai-settings-store';
 
 const PROVIDER_ID = 'ppt-openai';
 const MODEL_CONTEXT_WINDOW = 200_000;
@@ -44,6 +44,7 @@ export class PiRuntime {
   private runtime?: ModelRuntime;
   private initializationError?: string;
   private currentSnapshot: AiSettingsSnapshot;
+  private readonly sessions = new Set<AgentSession>();
 
   constructor(private readonly root: string, private readonly store: AiSettingsStore) {
     this.currentSnapshot = store.snapshot(false);
@@ -96,6 +97,7 @@ export class PiRuntime {
   }
 
   async save(input: AiSettingsInput) {
+    if (this.sessions.size) throw new Error('材料分析中，请结束分析后修改 AI 设置。');
     const normalized = validateAiSettings(input);
     await this.requireRuntime();
     const previousKey = this.store.getApiKey();
@@ -141,6 +143,7 @@ export class PiRuntime {
   }
 
   async clearCredential() {
+    if (this.sessions.size) throw new Error('材料分析中，请结束分析后清除凭据。');
     await this.requireRuntime();
     await this.runtime!.removeRuntimeApiKey(PROVIDER_ID);
     await this.store.clear();
@@ -156,12 +159,14 @@ export class PiRuntime {
       const model = this.runtime!.getModel(PROVIDER_ID, settings.modelId);
       if (!model) throw new Error(`模型 ${settings.modelId} 不存在或尚未注册。`);
       if (settings.thinkingLevel !== 'off' && !model.reasoning) throw new Error(`模型 ${settings.modelId} 不支持 reasoning。`);
-      await this.runtime!.completeSimple(model, {
+      const response = await this.runtime!.completeSimple(model, {
         messages: [{ role: 'user', content: 'Reply with OK.', timestamp: Date.now() }],
       }, {
         reasoning: settings.thinkingLevel === 'off' ? undefined : settings.thinkingLevel as Exclude<ThinkingLevel, 'off'>,
         timeoutMs: 30_000,
       } as CompleteOptions);
+      if (response.stopReason === 'error' || response.stopReason === 'aborted') throw new Error(response.errorMessage || '模型没有成功完成请求。');
+      if (response.stopReason === 'length' || !response.content.some((item) => item.type === 'text' && item.text.trim())) throw new Error('模型未返回有效测试文本，请检查服务输出预算或兼容性。');
       const result: ConnectionTestResult = { status: 'success', testedAt, message: 'OpenAI Responses reasoning 连接成功。' };
       await this.store.setTest(result);
       return result;
@@ -174,8 +179,67 @@ export class PiRuntime {
   }
 
   async dispose() {
+    for (const session of this.sessions) session.dispose();
+    this.sessions.clear();
     this.runtime = undefined;
     this.sdk = undefined;
+  }
+
+  safeError(cause: unknown) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    const key = this.store.getApiKey();
+    return redact(key ? message.split(key).join('[REDACTED]') : message).slice(0, 500);
+  }
+
+  async createAnalysisSession(cwd: string, systemPrompt: string, customTools: ToolDefinition[]) {
+    await this.requireRuntime();
+    const settings = this.store.current();
+    if (!settings.configured || !this.store.getApiKey()) throw new Error('请先在设置中配置 AI，再开始分析。');
+    const model = this.runtime!.getModel(PROVIDER_ID, settings.modelId);
+    if (!model) throw new Error('当前模型未注册，请检查 AI 设置。');
+    const sdk = this.sdk!;
+    const { session } = await sdk.createAgentSession({
+      cwd, agentDir: cwd, modelRuntime: this.runtime!, model,
+      thinkingLevel: settings.thinkingLevel,
+      noTools: 'all',
+      tools: customTools.map((tool) => tool.name), customTools,
+      sessionManager: sdk.SessionManager.inMemory(cwd),
+      settingsManager: sdk.SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } }),
+      resourceLoader: {
+        getExtensions: () => ({ extensions: [], errors: [], runtime: sdk.createExtensionRuntime() }),
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+        getPrompts: () => ({ prompts: [], diagnostics: [] }),
+        getThemes: () => ({ themes: [], diagnostics: [] }),
+        getAgentsFiles: () => ({ agentsFiles: [] }),
+        getSystemPrompt: () => systemPrompt, getSystemPromptSource: () => undefined,
+        getAppendSystemPrompt: () => [], getAppendSystemPromptSources: () => [],
+        extendResources: () => {}, reload: async () => {},
+      },
+    });
+    const originalStream = session.agent.streamFunction;
+    session.agent.streamFunction = (streamModel, context, options) => originalStream(streamModel, context, { ...options, maxTokens: MODEL_MAX_TOKENS });
+    const diagnostics: { maxOutputTokens?: number; toolCount?: number; reasoning?: string; providerStatus?: string; incompleteReason?: string; outputTypes?: string[]; outputTokens?: number } = {};
+    const originalPayload = session.agent.onPayload;
+    session.agent.onPayload = async (payload, requestModel) => {
+      const value = payload as { max_output_tokens?: number; tools?: unknown[]; reasoning?: { effort?: string } };
+      diagnostics.maxOutputTokens = value.max_output_tokens;
+      diagnostics.toolCount = value.tools?.length;
+      diagnostics.reasoning = value.reasoning?.effort;
+      return originalPayload?.(payload, requestModel);
+    };
+    const originalEvent = session.agent.onProviderStreamEvent;
+    session.agent.onProviderStreamEvent = async (data, requestModel) => {
+      const event = data as { type?: string; response?: { status?: string; incomplete_details?: { reason?: string }; output?: Array<{ type?: string }>; usage?: { output_tokens?: number } } };
+      if (event.type === 'response.completed' || event.type === 'response.incomplete') {
+        diagnostics.providerStatus = event.response?.status;
+        diagnostics.incompleteReason = event.response?.incomplete_details?.reason;
+        diagnostics.outputTypes = event.response?.output?.map((item) => item.type ?? 'unknown');
+        diagnostics.outputTokens = event.response?.usage?.output_tokens;
+      }
+      await originalEvent?.(data, requestModel);
+    };
+    this.sessions.add(session);
+    return { session, diagnostics, release: () => { session.dispose(); this.sessions.delete(session); } };
   }
 
   private async requireRuntime() {
