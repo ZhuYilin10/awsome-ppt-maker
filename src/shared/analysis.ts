@@ -54,6 +54,8 @@ export type AnalysisRunSnapshot = {
   currentMaterialId?: string;
   currentMaterialName?: string;
   currentTool?: string;
+  agentRequestNumber?: number;
+  agentRequestStartedAt?: string;
   completedMaterials: number;
   totalMaterials: number;
   materialStates?: Record<string, { status: 'read' | 'error'; message?: string }>;

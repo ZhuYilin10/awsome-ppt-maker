@@ -10,7 +10,7 @@ export default function AnalysisPanel({ project, run, busy, api, onSaved, onBack
   const report = project?.analysis;
   return <section className="analysis-panel">
     <div className="section-heading"><div><h2>Agent 材料分析</h2><p>本地证据读取 → Pi 理解与核实 → 结构化报告</p></div><button className="text-button" onClick={onBack}>返回修改材料</button></div>
-    {run && <div className="analysis-progress" role="status"><div><strong>{stages[run.status]}</strong><p>{run.message}</p><small>结构读取 {run.completedMaterials}/{run.totalMaterials} 份{run.currentMaterialName && ` · ${run.currentMaterialName}`}{run.currentTool && ` · ${toolNames[run.currentTool] ?? run.currentTool}`}</small></div>{busy && <button className="secondary-action" onClick={onCancel}>取消分析</button>}</div>}
+    {run && <div className="analysis-progress" role="status"><div><strong>{stages[run.status]}</strong><p>{run.message}</p><small>结构读取 {run.completedMaterials}/{run.totalMaterials} 份{run.currentMaterialName && ` · ${run.currentMaterialName}`}{run.currentTool && ` · ${toolNames[run.currentTool] ?? run.currentTool}`}{run.agentRequestNumber && ` · 模型第 ${run.agentRequestNumber} 轮`}</small></div>{busy && <button className="secondary-action" onClick={onCancel}>取消分析</button>}</div>}
     {run?.error && <p className="error-text" role="alert">{run.error}</p>}
     {report && <><article className="analysis-report"><h3>项目判断{busy || run?.status === 'failed' || run?.status === 'cancelled' ? '（上次成功结果）' : ''}</h3><p>{report.summary}</p></article><RepresentativePages project={project!} api={api} disabled={busy} onSaved={onSaved} /></>}
     {project?.materials.map((file) => {

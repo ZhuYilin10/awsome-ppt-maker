@@ -7,6 +7,7 @@ import { AiSettingsStore, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL, validat
 const PROVIDER_ID = 'ppt-openai';
 const MODEL_CONTEXT_WINDOW = 200_000;
 const MODEL_MAX_TOKENS = 32_768;
+const AGENT_REQUEST_TIMEOUT_MS = 120_000;
 const thinkingLevelMap = {
   off: null,
   minimal: 'minimal',
@@ -18,6 +19,23 @@ const thinkingLevelMap = {
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
 type CompleteOptions = { reasoning?: Exclude<ThinkingLevel, 'off'>; signal?: AbortSignal; timeoutMs?: number };
+export type AgentRequestTiming = {
+  phase: 'started' | 'finished';
+  requestId: number;
+  startedAt: string;
+  firstResponseAt?: string;
+  completedAt?: string;
+  totalMs?: number;
+  timeToFirstEventMs?: number;
+  providerStatus?: string;
+  incompleteReason?: string;
+  outputTypes?: string[];
+  outputTokens?: number;
+  reasoning?: string;
+  toolCount?: number;
+  imageCount?: number;
+  inputBytes?: number;
+};
 
 function loadPiSdk(): Promise<PiSdk> {
   // The Electron main bundle is CommonJS while Pi is ESM-only.
@@ -191,7 +209,7 @@ export class PiRuntime {
     return redact(key ? message.split(key).join('[REDACTED]') : message).slice(0, 500);
   }
 
-  async createAnalysisSession(cwd: string, systemPrompt: string, customTools: ToolDefinition[]) {
+  async createAnalysisSession(cwd: string, systemPrompt: string, customTools: ToolDefinition[], hooks: { onRequestTiming?: (timing: AgentRequestTiming) => void } = {}) {
     await this.requireRuntime();
     const settings = this.store.current();
     if (!settings.configured || !this.store.getApiKey()) throw new Error('请先在设置中配置 AI，再开始分析。');
@@ -217,11 +235,21 @@ export class PiRuntime {
       },
     });
     const originalStream = session.agent.streamFunction;
-    session.agent.streamFunction = (streamModel, context, options) => originalStream(streamModel, context, { ...options, maxTokens: MODEL_MAX_TOKENS });
+    session.agent.streamFunction = (streamModel, context, options) => originalStream(streamModel, context, { ...options, maxTokens: MODEL_MAX_TOKENS, timeoutMs: AGENT_REQUEST_TIMEOUT_MS, maxRetries: 0, maxRetryDelayMs: 0 });
     const diagnostics: { maxOutputTokens?: number; toolCount?: number; reasoning?: string; providerStatus?: string; incompleteReason?: string; outputTypes?: string[]; outputTokens?: number } = {};
+    let requestId = 0;
+    let activeRequest: AgentRequestTiming | undefined;
+    const countImages = (value: unknown): number => {
+      if (Array.isArray(value)) return value.reduce((count, item) => count + countImages(item), 0);
+      if (!value || typeof value !== 'object') return 0;
+      return ('type' in value && value.type === 'input_image' ? 1 : 0) + Object.values(value).reduce((count, item) => count + countImages(item), 0);
+    };
     const originalPayload = session.agent.onPayload;
     session.agent.onPayload = async (payload, requestModel) => {
       const value = payload as { max_output_tokens?: number; tools?: unknown[]; reasoning?: { effort?: string } };
+      const startedAt = new Date().toISOString();
+      activeRequest = { phase: 'started', requestId: ++requestId, startedAt, reasoning: value.reasoning?.effort, toolCount: value.tools?.length, imageCount: countImages(payload), inputBytes: JSON.stringify((payload as { input?: unknown }).input ?? '').length };
+      hooks.onRequestTiming?.(activeRequest);
       diagnostics.maxOutputTokens = value.max_output_tokens;
       diagnostics.toolCount = value.tools?.length;
       diagnostics.reasoning = value.reasoning?.effort;
@@ -230,11 +258,19 @@ export class PiRuntime {
     const originalEvent = session.agent.onProviderStreamEvent;
     session.agent.onProviderStreamEvent = async (data, requestModel) => {
       const event = data as { type?: string; response?: { status?: string; incomplete_details?: { reason?: string }; output?: Array<{ type?: string }>; usage?: { output_tokens?: number } } };
-      if (event.type === 'response.completed' || event.type === 'response.incomplete') {
+      if (activeRequest && !activeRequest.firstResponseAt) {
+        activeRequest.firstResponseAt = new Date().toISOString();
+        activeRequest.timeToFirstEventMs = Date.parse(activeRequest.firstResponseAt) - Date.parse(activeRequest.startedAt);
+      }
+      if (activeRequest && (event.type === 'response.completed' || event.type === 'response.incomplete' || event.type === 'response.failed')) {
         diagnostics.providerStatus = event.response?.status;
         diagnostics.incompleteReason = event.response?.incomplete_details?.reason;
         diagnostics.outputTypes = event.response?.output?.map((item) => item.type ?? 'unknown');
         diagnostics.outputTokens = event.response?.usage?.output_tokens;
+        const completedAt = new Date().toISOString();
+        const finished: AgentRequestTiming = { ...activeRequest, phase: 'finished', completedAt, totalMs: Date.parse(completedAt) - Date.parse(activeRequest.startedAt), providerStatus: event.response?.status, incompleteReason: event.response?.incomplete_details?.reason, outputTypes: event.response?.output?.map((item) => item.type ?? 'unknown'), outputTokens: event.response?.usage?.output_tokens };
+        hooks.onRequestTiming?.(finished);
+        activeRequest = undefined;
       }
       await originalEvent?.(data, requestModel);
     };
