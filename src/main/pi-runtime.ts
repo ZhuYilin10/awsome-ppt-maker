@@ -1,8 +1,8 @@
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AiRuntimeStatus, AiSettingsInput, AiSettingsSnapshot, ConnectionTestResult, ThinkingLevel } from '../shared/ai';
-import { AiSettingsStore, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL, DEFAULT_THINKING_LEVEL, validateAiSettings } from './ai-settings-store';
+import type { AiModelOption, AiRuntimeStatus, AiSettingsInput, AiSettingsSnapshot, ConnectionTestResult, ThinkingLevel } from '../shared/ai';
+import { AiSettingsStore, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL, DEFAULT_THINKING_LEVEL, validateAiSettings, validateBaseUrl } from './ai-settings-store';
 
 const PROVIDER_ID = 'ppt-openai';
 const MODEL_CONTEXT_WINDOW = 200_000;
@@ -105,6 +105,39 @@ export class PiRuntime {
     await this.store.save(normalized, hasKey);
     this.currentSnapshot = this.store.snapshot(true);
     return this.currentSnapshot;
+  }
+
+  async fetchModels(input: AiSettingsInput): Promise<AiModelOption[]> {
+    if (!input || input.provider !== 'openai') throw new Error('目前只支持 OpenAI Provider。');
+    const baseUrl = validateBaseUrl(input.baseUrl);
+    const apiKey = input.apiKey || this.store.getApiKey();
+    if (!apiKey) throw new Error('请填写 OpenAI API Key 后再拉取模型列表。');
+    if (apiKey.length < 10 || apiKey.length > 500) throw new Error('API Key 长度无效。');
+
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}/models`, {
+        headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (cause) {
+      throw new Error(`模型列表请求失败：${redact(cause instanceof Error ? cause.message : String(cause))}`);
+    }
+    if (!response.ok) throw new Error(`模型列表请求失败（HTTP ${response.status}）。`);
+
+    let payload: unknown;
+    try { payload = await response.json(); } catch { throw new Error('模型列表响应不是有效 JSON。'); }
+    const rawModels = Array.isArray(payload) ? payload : payload && typeof payload === 'object' && 'data' in payload && Array.isArray(payload.data) ? payload.data : payload && typeof payload === 'object' && 'models' in payload && Array.isArray(payload.models) ? payload.models : [];
+    const models: AiModelOption[] = [];
+    const seen = new Set<string>();
+    for (const item of rawModels) {
+      const id = typeof item === 'string' ? item : item && typeof item === 'object' && 'id' in item && typeof item.id === 'string' ? item.id : '';
+      if (!id || seen.has(id) || id.length > 160) continue;
+      seen.add(id);
+      models.push({ id, name: typeof item === 'object' && item && 'name' in item && typeof item.name === 'string' ? item.name : id });
+    }
+    if (!models.length) throw new Error('模型列表为空，或响应中没有可识别的模型 ID。');
+    return models.sort((left, right) => left.id.localeCompare(right.id));
   }
 
   async clearCredential() {

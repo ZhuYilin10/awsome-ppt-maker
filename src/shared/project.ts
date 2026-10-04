@@ -1,4 +1,4 @@
-import type { AiRuntimeStatus, AiSettingsInput, AiSettingsSnapshot, ConnectionTestResult } from './ai';
+import type { AiModelOption, AiRuntimeStatus, AiSettingsInput, AiSettingsSnapshot, ConnectionTestResult } from './ai';
 
 export type MaterialPurpose = 'primary' | 'content' | 'reference' | 'asset' | 'auto';
 export type SelectedMaterial = { id: string; sourcePath: string; name: string; size: number };
@@ -25,6 +25,7 @@ export interface DesktopAPI {
   revealProject(id: string): Promise<void>;
   getAiSettings(): Promise<AiSettingsSnapshot>;
   saveAiSettings(input: AiSettingsInput): Promise<AiSettingsSnapshot>;
+  fetchAiModels(input: AiSettingsInput): Promise<AiModelOption[]>;
   testAiConnection(): Promise<ConnectionTestResult>;
   clearAiCredential(): Promise<void>;
   runtimeStatus(): Promise<RuntimeStatus>;

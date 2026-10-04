@@ -27,6 +27,11 @@ export type AiSettingsInput = {
   thinkingLevel: ThinkingLevel;
 };
 
+export type AiModelOption = {
+  id: string;
+  name: string;
+};
+
 export type AiRuntimeStatus = {
   configured: boolean;
   runtimeReady: boolean;

@@ -197,6 +197,11 @@ input::placeholder, textarea::placeholder { color: #707b87; }
 .settings-fields label { display: grid; gap: 8px; color: #3f4b58; font-size: 12px; font-weight: 700; }
 .settings-fields label > span { color: #65707c; font-size: 10px; font-weight: 400; }
 .settings-fields input { padding: 12px 13px; font-size: 12px; }
+.field-with-action { display: flex; gap: 8px; }
+.field-with-action input { min-width: 0; flex: 1; }
+.fetch-models-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; min-width: 96px; padding: 0 12px; color: #5267df; background: #f0f2ff; border: 1px solid #cbd2ff; border-radius: 6px; font-size: 11px; font-weight: 700; }
+.fetch-models-button:hover:not(:disabled) { background: #e7eaff; border-color: #9aa6ef; }
+.model-count { display: inline-flex; align-items: center; gap: 5px; color: #6274dd; font-size: 10px; font-weight: 400; }
 .secret-field { position: relative; }
 .secret-field input { padding-right: 43px; }
 .secret-field button { position: absolute; right: 9px; top: 8px; display: grid; place-items: center; width: 29px; height: 29px; color: #788493; background: transparent; border-radius: 5px; }
@@ -211,6 +216,8 @@ input::placeholder, textarea::placeholder { color: #707b87; }
 .settings-info { display: flex; gap: 8px; margin-top: 17px; padding: 11px 12px; color: #52628e; background: #f3f4ff; border: 1px solid #dfe3ff; border-radius: 6px; font-size: 10px; line-height: 1.6; }
 .settings-info svg { flex: 0 0 auto; color: #6274dd; }
 .settings-info code { padding: 1px 3px; color: #3b4a9b; background: #e6e9ff; border-radius: 3px; font-family: ui-monospace, monospace; }
+.settings-warning { display: flex; gap: 8px; margin-top: 17px; padding: 11px 12px; color: #8a6331; background: #fff8e9; border: 1px solid #f1ddb4; border-radius: 6px; font-size: 10px; line-height: 1.6; }
+.settings-warning svg { flex: 0 0 auto; color: #c18a35; }
 .settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 45px; padding-top: 10px; }
 .settings-actions > div:first-child { min-width: 0; color: #65707c; font-size: 11px; }
 .settings-actions > div:last-child { display: flex; gap: 9px; }

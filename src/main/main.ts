@@ -87,6 +87,7 @@ app.whenReady().then(async () => {
   });
   handle('ai:get-settings', () => piRuntime.getSettings());
   handle('ai:save-settings', (input) => piRuntime.save(input));
+  handle('ai:fetch-models', (input) => piRuntime.fetchModels(input));
   handle('ai:test-connection', () => piRuntime.testConnection());
   handle('ai:clear-credential', () => piRuntime.clearCredential());
   handle('runtime:status', async () => ({ officecli: await officeStatus(), ai: piRuntime.status() }));

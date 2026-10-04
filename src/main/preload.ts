@@ -11,6 +11,7 @@ const api: DesktopAPI = {
   revealProject: (id) => ipcRenderer.invoke('project:reveal', id),
   getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
   saveAiSettings: (input) => ipcRenderer.invoke('ai:save-settings', input),
+  fetchAiModels: (input) => ipcRenderer.invoke('ai:fetch-models', input),
   testAiConnection: () => ipcRenderer.invoke('ai:test-connection'),
   clearAiCredential: () => ipcRenderer.invoke('ai:clear-credential'),
   runtimeStatus: () => ipcRenderer.invoke('runtime:status'),

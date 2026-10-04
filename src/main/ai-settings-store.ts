@@ -13,15 +13,20 @@ const thinkingLevels = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium'
 
 export function validateAiSettings(input: AiSettingsInput) {
   if (!input || input.provider !== 'openai') throw new Error('目前只支持 OpenAI Provider。');
-  if (typeof input.baseUrl !== 'string' || input.baseUrl.length > 500) throw new Error('Base URL 无效。');
-  let url: URL;
-  try { url = new URL(input.baseUrl); } catch { throw new Error('Base URL 必须是有效的 URL。'); }
-  const localDevelopmentUrl = url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost');
-  if (url.protocol !== 'https:' && !localDevelopmentUrl) throw new Error('Base URL 必须使用 HTTPS；本地开发仅允许 localhost。');
+  const baseUrl = validateBaseUrl(input.baseUrl);
   if (typeof input.modelId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,159}$/.test(input.modelId.trim())) throw new Error('Model ID 只能包含字母、数字、点、下划线、冒号、斜线和短横线。');
   if (!thinkingLevels.has(input.thinkingLevel)) throw new Error('Reasoning level 无效。');
   if (input.apiKey !== undefined && input.apiKey !== '' && (input.apiKey.length < 10 || input.apiKey.length > 500)) throw new Error('API Key 长度无效。');
-  return { ...input, baseUrl: input.baseUrl.replace(/\/+$/, ''), modelId: input.modelId.trim() };
+  return { ...input, baseUrl, modelId: input.modelId.trim() };
+}
+
+export function validateBaseUrl(baseUrl: string) {
+  if (typeof baseUrl !== 'string' || baseUrl.length > 500) throw new Error('Base URL 无效。');
+  let url: URL;
+  try { url = new URL(baseUrl); } catch { throw new Error('Base URL 必须是有效的 URL。'); }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Base URL 必须使用 HTTP 或 HTTPS。');
+  if (url.username || url.password) throw new Error('Base URL 不能包含用户名或密码。');
+  return baseUrl.replace(/\/+$/, '');
 }
 
 export class AiSettingsStore {
