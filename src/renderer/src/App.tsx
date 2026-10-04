@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectRecord, ProjectSummary, RuntimeStatus } from '../../shared/project';
-import type { AnalysisRunSnapshot } from '../../shared/analysis';
+import type { AnalysisRunSnapshot, DesignRunSnapshot } from '../../shared/analysis';
 import Settings from './Settings';
 import AnalysisPanel from './AnalysisPanel';
+import DesignPanel from './DesignPanel';
 import {
   ArrowRight,
   Check,
@@ -57,10 +58,12 @@ function App() {
   const [recent, setRecent] = useState<ProjectSummary[]>([]);
   const [showRecent, setShowRecent] = useState(false);
   const [analysisVisible, setAnalysisVisible] = useState(false);
+  const [designVisible, setDesignVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [runtime, setRuntime] = useState<RuntimeStatus>();
   const [analysisRun, setAnalysisRun] = useState<AnalysisRunSnapshot>();
+  const [designRun, setDesignRun] = useState<DesignRunSnapshot>();
   const [dragging, setDragging] = useState(false);
   const operationPending = useRef(false);
   const projectIdRef = useRef<string>();
@@ -69,7 +72,7 @@ function App() {
   useEffect(() => {
     if (!api) return;
     void Promise.all([api.listProjects(), api.runtimeStatus()]).then(([items, status]) => { setRecent(items); setRuntime(status); }).catch((cause) => setError(String(cause)));
-    return api.onAnalysisEvent((event) => {
+    const removeAnalysisListener = api.onAnalysisEvent((event) => {
       if (event.snapshot.projectId !== projectIdRef.current) return;
       setAnalysisRun(event.snapshot);
       if (event.type === 'run-failed' || event.type === 'run-cancelled') setError(event.message ?? event.snapshot.error ?? '材料分析未完成。');
@@ -78,6 +81,13 @@ function App() {
         if (event.type === 'run-completed') setError('');
       }).catch(() => undefined);
     });
+    const removeDesignListener = api.onDesignEvent((event) => {
+      if (event.snapshot.projectId !== projectIdRef.current) return;
+      setDesignRun(event.snapshot);
+      if (event.type === 'run-completed') void api.openProject(event.snapshot.projectId).then(setProject).catch(() => undefined);
+      if (event.type === 'run-failed' || event.type === 'run-cancelled') setError(event.message ?? event.snapshot.error ?? '初步设计方案未完成。');
+    });
+    return () => { removeAnalysisListener(); removeDesignListener(); };
   }, [api]);
 
   useEffect(() => {
@@ -91,7 +101,8 @@ function App() {
   const primaryCount = useMemo(() => materials.filter((material) => material.purpose === 'primary').length, [materials]);
   const canContinue = projectName.trim().length > 1 && materials.length > 0 && primaryCount === 1;
   const analysisBusy = Boolean(analysisRun && !['completed', 'failed', 'cancelled'].includes(analysisRun.status));
-  const saving = isSaving || analysisBusy;
+  const designBusy = Boolean(designRun && !['completed', 'failed', 'cancelled'].includes(designRun.status));
+  const saving = isSaving || analysisBusy || designBusy;
 
   async function addMaterials(files?: File[]) {
     setError('');
@@ -162,17 +173,17 @@ function App() {
     operationPending.current = true;
     try {
       const record = await api.openProject(id);
-      setProject(record); setProjectName(record.name); setBrief(record.brief); setMaterials(record.materials);
+       setProject(record); setProjectName(record.name); setBrief(record.brief); setMaterials(record.materials);
       const run = await api.getAnalysisRun(record.id);
-      setSavedPath(record.projectPath); setDirty(false); setShowRecent(false); setAnalysisVisible(Boolean(record.analysis || (run && !['completed', 'failed', 'cancelled'].includes(run.status)))); setAnalysisRun(run); setError('');
+       setSavedPath(record.projectPath); setDirty(false); setShowRecent(false); setAnalysisVisible(Boolean(record.analysis || (run && !['completed', 'failed', 'cancelled'].includes(run.status)))); setDesignVisible(Boolean(record.designDraft)); setAnalysisRun(run); setDesignRun(await api.getDesignRun(record.id)); setError('');
     } catch (cause) { setError(String(cause)); } finally { operationPending.current = false; }
   }
 
   function newProject() {
     if (saving || operationPending.current) return;
     if (dirty && !window.confirm('有修改未保存，是否放弃修改并新建项目？')) return;
-    setProject(undefined); setProjectName(''); setBrief(''); setMaterials([]); setSavedPath(''); setAnalysisRun(undefined);
-    setDirty(false); setAnalysisVisible(false); setShowRecent(false); setError('');
+     setProject(undefined); setProjectName(''); setBrief(''); setMaterials([]); setSavedPath(''); setAnalysisRun(undefined); setDesignRun(undefined);
+     setDirty(false); setAnalysisVisible(false); setDesignVisible(false); setShowRecent(false); setError('');
   }
 
   if (settingsVisible) return <main className="app-shell"><aside className="sidebar"><div className="brand-lockup"><div className="brand-mark"><Layers3 size={20} strokeWidth={2.4} /></div><div><div className="brand-name">PPT Plan</div><div className="brand-caption">STUDIO</div></div></div><div className="sidebar-section-label">工作区</div><nav className="workflow-nav" aria-label="工作区导航"><button className="workflow-item" onClick={() => setSettingsVisible(false)}><span className="workflow-number">01</span><span>项目材料</span></button><button className="workflow-item active"><Settings2 size={15} /><span>设置</span><span className="workflow-dot" /></button></nav><div className="sidebar-footnote"><Sparkles size={15} /><span>配置 Provider，<br />让 Agent 开始工作。</span></div></aside><section className="workspace"><Settings api={api} onBack={() => setSettingsVisible(false)} /></section></main>;
@@ -191,9 +202,9 @@ function App() {
 
         <div className="sidebar-section-label">工作流</div>
         <nav className="workflow-nav" aria-label="项目工作流">
-           <button className={`workflow-item ${!analysisVisible ? 'active' : ''}`} onClick={() => setAnalysisVisible(false)}><span className="workflow-number">01</span><span>导入材料</span>{!analysisVisible && <span className="workflow-dot" />}</button>
-            <button className={`workflow-item ${analysisVisible ? 'active' : ''}`} disabled={project?.analysis?.status !== 'completed' || dirty || analysisBusy} onClick={() => setAnalysisVisible(true)}><span className="workflow-number">02</span><span>选择代表页</span>{analysisVisible && <span className="workflow-dot" />}</button>
-           <button className="workflow-item" disabled><span className="workflow-number">03</span><span>代表页 Plan</span></button>
+            <button className={`workflow-item ${!analysisVisible && !designVisible ? 'active' : ''}`} onClick={() => { setAnalysisVisible(false); setDesignVisible(false); }}><span className="workflow-number">01</span><span>导入材料</span>{!analysisVisible && !designVisible && <span className="workflow-dot" />}</button>
+             <button className={`workflow-item ${analysisVisible && !designVisible ? 'active' : ''}`} disabled={project?.analysis?.status !== 'completed' || dirty || analysisBusy || designBusy} onClick={() => { setAnalysisVisible(true); setDesignVisible(false); }}><span className="workflow-number">02</span><span>选择代表页</span>{analysisVisible && !designVisible && <span className="workflow-dot" />}</button>
+            <button className={`workflow-item ${designVisible ? 'active' : ''}`} disabled={project?.analysis?.status !== 'completed' || project?.representativeSelection?.runId !== project.analysis?.runId || dirty || analysisBusy} onClick={() => { setAnalysisVisible(true); setDesignVisible(true); }}><span className="workflow-number">03</span><span>特选页面原型</span>{designVisible && <span className="workflow-dot" />}</button>
            <button className="workflow-item" disabled><span className="workflow-number">04</span><span>设计规范</span></button>
            <button className="workflow-item" disabled><span className="workflow-number">05</span><span>整套制作</span></button>
         </nav>
@@ -216,13 +227,13 @@ function App() {
           {showRecent && <section className="recent-panel"><h2>最近项目</h2>{recent.length ? recent.map((item) => <button className="recent-item" key={item.id} onClick={() => openProject(item.id)}><span>{item.name}</span><small>{item.materialCount} 份材料 · {new Date(item.updatedAt).toLocaleDateString('zh-CN')}</small><ArrowRight size={16} /></button>) : <p>还没有已保存项目。</p>}</section>}
           <div className="intro-row">
             <div>
-              <h1>{analysisVisible ? '读懂材料，再确定代表页。' : '先把材料交给 Agent。'}</h1>
-              <p className="intro-copy">{analysisVisible ? '查看材料判断与证据，选择能覆盖不同内容结构的页面。' : '告诉它每份文件该怎么用。说明越具体，后面生成的设计规范越贴近你的真实意图。'}</p>
+              <h1>{designVisible ? '先让设计方向变得可见。' : analysisVisible ? '读懂材料，再确定代表页。' : '先把材料交给 Agent。'}</h1>
+              <p className="intro-copy">{designVisible ? 'Pi 会基于真实页面生成少量原型，先看方向，再进入逐页对话。' : analysisVisible ? '查看材料判断与证据，选择能覆盖不同内容结构的页面。' : '告诉它每份文件该怎么用。说明越具体，后面生成的设计规范越贴近你的真实意图。'}</p>
             </div>
-            <div className="stage-mark"><span>PLAN</span><span className="stage-line" /><span>{analysisVisible ? '02' : '01'}</span></div>
+             <div className="stage-mark"><span>PLAN</span><span className="stage-line" /><span>{designVisible ? '03' : analysisVisible ? '02' : '01'}</span></div>
           </div>
 
-           {analysisVisible ? <AnalysisPanel project={project} run={analysisRun} busy={analysisBusy || dirty} api={api} onSaved={setProject} onBack={() => setAnalysisVisible(false)} onCancel={() => { if (project) void api?.cancelProjectAnalysis(project.id).catch((cause) => setError(String(cause))); }} /> : (
+            {designVisible ? <DesignPanel project={project} run={designRun} busy={designBusy} api={api} onRunStarted={setDesignRun} onBack={() => setDesignVisible(false)} onCancel={() => { if (project) void api?.cancelDesignDraft(project.id).catch((cause) => setError(String(cause))); }} /> : analysisVisible ? <AnalysisPanel project={project} run={analysisRun} busy={analysisBusy || dirty} api={api} onSaved={setProject} onBack={() => setAnalysisVisible(false)} onStartDesign={() => setDesignVisible(true)} onCancel={() => { if (project) void api?.cancelProjectAnalysis(project.id).catch((cause) => setError(String(cause))); }} /> : (
             <section className="setup-main">
               <div className="section-heading"><div><h2>项目基本信息</h2><p>这是 Agent 在整个项目中都会看到的背景。</p></div><Info size={17} /></div>
               <div className="field-group">

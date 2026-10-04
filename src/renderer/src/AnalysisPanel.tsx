@@ -6,13 +6,13 @@ const stages: Record<string, string> = { queued: '等待开始', preflight: '检
 const toolNames: Record<string, string> = { read_material_manifest: '材料清单', office_read: 'Office 内容', office_get: '页面与母版结构', render_pptx_page: 'PPT 页面预览', read_pdf: 'PDF 文本', render_pdf_page: 'PDF 页面预览', inspect_image: '图片分片', submit_analysis: '结构化报告' };
 const roles: Record<string, string> = { 'primary-deck': '主稿', template: '模板', content: '内容材料', reference: '参考材料', asset: '素材', unknown: '待确认' };
 
-export default function AnalysisPanel({ project, run, busy, api, onSaved, onBack, onCancel }: { project?: ProjectRecord; run?: AnalysisRunSnapshot; busy: boolean; api?: DesktopAPI; onSaved: (project: ProjectRecord) => void; onBack: () => void; onCancel: () => void }) {
+export default function AnalysisPanel({ project, run, busy, api, onSaved, onBack, onCancel, onStartDesign }: { project?: ProjectRecord; run?: AnalysisRunSnapshot; busy: boolean; api?: DesktopAPI; onSaved: (project: ProjectRecord) => void; onBack: () => void; onCancel: () => void; onStartDesign: () => void }) {
   const report = project?.analysis;
   return <section className="analysis-panel">
     <div className="section-heading"><div><h2>Agent 材料分析</h2><p>本地证据读取 → Pi 理解与核实 → 结构化报告</p></div><button className="text-button" onClick={onBack}>返回修改材料</button></div>
     {run && <div className="analysis-progress" role="status"><div><strong>{stages[run.status]}</strong><p>{run.message}</p><small>结构读取 {run.completedMaterials}/{run.totalMaterials} 份{run.currentMaterialName && ` · ${run.currentMaterialName}`}{run.currentTool && ` · ${toolNames[run.currentTool] ?? run.currentTool}`}{run.agentRequestNumber && ` · 模型第 ${run.agentRequestNumber} 轮`}</small></div>{busy && <button className="secondary-action" onClick={onCancel}>取消分析</button>}</div>}
     {run?.error && <p className="error-text" role="alert">{run.error}</p>}
-    {report && <><article className="analysis-report"><h3>项目判断{busy || run?.status === 'failed' || run?.status === 'cancelled' ? '（上次成功结果）' : ''}</h3><p>{report.summary}</p></article><RepresentativePages project={project!} api={api} disabled={busy} onSaved={onSaved} /></>}
+     {report && <><article className="analysis-report"><h3>项目判断{busy || run?.status === 'failed' || run?.status === 'cancelled' ? '（上次成功结果）' : ''}</h3><p>{report.summary}</p></article><RepresentativePages project={project!} api={api} disabled={busy} onSaved={onSaved} /><div className="next-stage-card"><div><strong>下一步：让方向变得可见</strong><p>{project?.representativeSelection?.runId === report.runId ? 'Pi 会基于你确认的页面生成独立原型并提供前后对照预览。' : '请先确认代表页，再让 Pi 生成独立原型和前后对照预览。'}</p></div><button className="primary-action" disabled={busy || project?.representativeSelection?.runId !== report.runId} onClick={onStartDesign}>生成初步方案</button></div></>}
     {project?.materials.map((file) => {
       const result = report?.materials.find((item) => item.materialId === file.id);
       const deterministic = run?.materialStates?.[file.id];

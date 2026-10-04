@@ -98,6 +98,8 @@ export class ProjectStore {
       if (previous && previous.name === record.name && previous.brief === record.brief && JSON.stringify(previous.materials.map(({ id, purpose, note }) => ({ id, purpose, note }))) === JSON.stringify(materials.map(({ id, purpose, note }) => ({ id, purpose, note })))) {
         record.analysis = previous.analysis;
         record.representativeSelection = previous.representativeSelection;
+        record.designDraft = previous.designDraft;
+        record.prototypePreview = previous.prototypePreview;
       }
       // Validate again using trusted file names, not renderer-supplied metadata.
       validateProject(record);

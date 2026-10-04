@@ -1,5 +1,5 @@
 import type { AiModelOption, AiRuntimeStatus, AiSettingsInput, AiSettingsSnapshot, ConnectionTestResult } from './ai';
-import type { AnalysisEvent, AnalysisRunSnapshot, ProjectAnalysis } from './analysis';
+import type { AnalysisEvent, AnalysisRunSnapshot, DesignDraft, DesignEvent, DesignRunSnapshot, ProjectAnalysis, PrototypePreview } from './analysis';
 
 export type MaterialPurpose = 'primary' | 'content' | 'reference' | 'asset' | 'auto';
 export type SelectedMaterial = { id: string; sourcePath: string; name: string; size: number };
@@ -16,6 +16,8 @@ export type ProjectRecord = Omit<ProjectInput, 'materials' | 'id'> & {
   analysis?: ProjectAnalysis;
   analysisRef?: { runId: string; status: ProjectAnalysis['status']; completedAt?: string };
   representativeSelection?: { runId: string; pageNumbers: number[]; confirmedAt: string };
+  designDraft?: DesignDraft;
+  prototypePreview?: PrototypePreview;
 };
 export type ProjectSummary = Pick<ProjectRecord, 'id' | 'name' | 'updatedAt'> & { materialCount: number };
 export type RuntimeStatus = { officecli: { available: boolean; version?: string }; ai: AiRuntimeStatus };
@@ -40,4 +42,10 @@ export interface DesktopAPI {
   onAnalysisEvent(listener: (event: AnalysisEvent) => void): () => void;
   saveRepresentativePages(id: string, pageNumbers: number[]): Promise<ProjectRecord>;
   getRepresentativePreview(id: string, pageNumber: number): Promise<string | undefined>;
+  startDesignDraft(id: string): Promise<DesignRunSnapshot>;
+  cancelDesignDraft(id: string): Promise<void>;
+  getDesignRun(id: string): Promise<DesignRunSnapshot | undefined>;
+  getDesignDraft(id: string): Promise<DesignDraft | undefined>;
+  getPrototypePreview(id: string, sourcePageNumber: number): Promise<string | undefined>;
+  onDesignEvent(listener: (event: DesignEvent) => void): () => void;
 }

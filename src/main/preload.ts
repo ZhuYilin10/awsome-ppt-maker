@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { DesktopAPI } from '../shared/project';
 import type { AnalysisEvent } from '../shared/analysis';
+import type { DesignEvent } from '../shared/analysis';
 
 const api: DesktopAPI = {
   selectMaterials: () => ipcRenderer.invoke('materials:select'),
@@ -22,10 +23,20 @@ const api: DesktopAPI = {
   getProjectAnalysis: (id) => ipcRenderer.invoke('project:analysis-result', id),
   saveRepresentativePages: (id, pageNumbers) => ipcRenderer.invoke('project:representative-save', id, pageNumbers),
   getRepresentativePreview: (id, pageNumber) => ipcRenderer.invoke('project:representative-preview', id, pageNumber),
+  startDesignDraft: (id) => ipcRenderer.invoke('project:design-start', id),
+  cancelDesignDraft: (id) => ipcRenderer.invoke('project:design-cancel', id),
+  getDesignRun: (id) => ipcRenderer.invoke('project:design-run', id),
+  getDesignDraft: (id) => ipcRenderer.invoke('project:design-draft', id),
+  getPrototypePreview: (id, pageNumber) => ipcRenderer.invoke('project:prototype-preview', id, pageNumber),
   onAnalysisEvent: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: AnalysisEvent) => listener(payload);
     ipcRenderer.on('project:analysis-event', handler);
     return () => ipcRenderer.removeListener('project:analysis-event', handler);
+  },
+  onDesignEvent: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: DesignEvent) => listener(payload);
+    ipcRenderer.on('project:design-event', handler);
+    return () => ipcRenderer.removeListener('project:design-event', handler);
   },
 };
 contextBridge.exposeInMainWorld('pptPlan', api);

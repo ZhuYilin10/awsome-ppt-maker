@@ -205,6 +205,8 @@ export class AnalysisRunner {
       context.committing = true;
       record.analysis = submitted;
       record.representativeSelection = undefined;
+      record.designDraft = undefined;
+      record.prototypePreview = undefined;
       record.updatedAt = submitted.completedAt;
       for (const material of record.materials) {
         const fact = facts.find((item) => item.materialId === material.id)!;
