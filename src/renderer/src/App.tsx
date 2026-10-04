@@ -188,6 +188,7 @@ function App() {
           <div className="topbar-actions"><span className="local-badge"><span className="status-dot" />本地工作区</span><button className="text-button" onClick={() => setSettingsVisible(true)} disabled={!api || saving}><Settings2 size={16} />设置</button><button className="text-button" onClick={newProject} disabled={!api || saving}>新建项目</button><button className="text-button" onClick={() => setShowRecent(!showRecent)} disabled={!api || saving}><FolderOpen size={17} />最近项目</button></div>
         </header>
 
+        <div className="project-workspace">
         <div className="content-scroll">
           {!api && <div className="preview-warning">这是界面预览。本地文件与项目操作仅在 Electron 桌面程序中可用。</div>}
           {showRecent && <section className="recent-panel"><h2>最近项目</h2>{recent.length ? recent.map((item) => <button className="recent-item" key={item.id} onClick={() => openProject(item.id)}><span>{item.name}</span><small>{item.materialCount} 份材料 · {new Date(item.updatedAt).toLocaleDateString('zh-CN')}</small><ArrowRight size={16} /></button>) : <p>还没有已保存项目。</p>}</section>}
@@ -199,7 +200,7 @@ function App() {
             <div className="stage-mark"><span>PLAN</span><span className="stage-line" /><span>01</span></div>
           </div>
 
-          {analysisVisible ? <section className="analysis-panel"><div className="section-heading"><div><h2>材料基础分析</h2><p>真实的 OfficeCLI 结构统计；代表页推荐和 AI 分析将在下一阶段接入。</p></div><button className="text-button" onClick={() => setAnalysisVisible(false)}>返回修改材料</button></div>{project?.materials.map((file) => <article className="analysis-item" key={file.id}><div className="material-topline"><strong>{file.name}</strong><span className={`analysis-status ${file.analysis?.status}`}>{file.analysis?.status === 'analyzed' ? '统计完成' : file.analysis?.status === 'error' ? '分析失败' : '待识别'}</span></div><p>{purposeLabels[file.purpose].label}{file.note && ` · ${file.note}`}</p>{file.analysis?.summary && <details><summary>查看统计结果</summary><pre>{file.analysis.summary}</pre></details>}{file.analysis?.message && <p className={file.analysis.status === 'error' ? 'error-text' : ''}>{file.analysis.message}</p>}</article>)}<p className="field-hint">此版本暂未生成代表页或设计规范。</p></section> : <div className="setup-grid">
+          {analysisVisible ? <section className="analysis-panel"><div className="section-heading"><div><h2>材料基础分析</h2><p>真实的 OfficeCLI 结构统计；代表页推荐和 AI 分析将在下一阶段接入。</p></div><button className="text-button" onClick={() => setAnalysisVisible(false)}>返回修改材料</button></div>{project?.materials.map((file) => <article className="analysis-item" key={file.id}><div className="material-topline"><strong>{file.name}</strong><span className={`analysis-status ${file.analysis?.status}`}>{file.analysis?.status === 'analyzed' ? '统计完成' : file.analysis?.status === 'error' ? '分析失败' : '待识别'}</span></div><p>{purposeLabels[file.purpose].label}{file.note && ` · ${file.note}`}</p>{file.analysis?.summary && <details><summary>查看统计结果</summary><pre>{file.analysis.summary}</pre></details>}{file.analysis?.message && <p className={file.analysis.status === 'error' ? 'error-text' : ''}>{file.analysis.message}</p>}</article>)}<p className="field-hint">此版本暂未生成代表页或设计规范。</p></section> : (
             <section className="setup-main">
               <div className="section-heading"><div><h2>项目基本信息</h2><p>这是 Agent 在整个项目中都会看到的背景。</p></div><Info size={17} /></div>
               <div className="field-group">
@@ -240,8 +241,11 @@ function App() {
                 </div>
               )}
             </section>
+          )}
+        </div>
 
-            <aside className="setup-aside">
+            <aside className="setup-aside" aria-label="项目操作">
+              <div className="aside-content">
               <div className="aside-card agent-card">
                 <div className="aside-card-header"><span className="mini-agent-mark"><Sparkles size={14} /></span><span>Agent 会怎么处理</span></div>
                 <ol className="agent-steps">
@@ -253,13 +257,13 @@ function App() {
               <div className="aside-card rule-card"><div className="rule-icon"><Check size={15} /></div><div><strong>原文件不会被修改</strong><p>导入时复制到项目目录。用途与说明会进入项目记录，供后续 Agent 使用。</p></div></div>
               <div className="aside-note"><Sparkles size={14} /><span>主稿只能有一份。其他文件可以作为内容、参考或素材。</span></div>
               <div className="runtime-note">OfficeCLI：{runtime ? runtime.officecli.available ? runtime.officecli.version : '未检测到，可先保存' : '检测中'}<br />AI Runtime：{runtime ? runtime.ai.runtimeReady ? runtime.ai.configured ? `OpenAI / ${runtime.ai.modelId}` : '未配置' : '不可用' : '检测中'}</div>
-            </aside>
-          </div>}
+              </div>
 
           <footer className="action-bar">
             <div className="action-status" aria-live="polite">{error ? <span className="error-text" role="alert">{error}</span> : dirty && savedPath ? '有修改尚未保存' : savedPath ? <span className="success-text"><Check size={15} />项目已保存到本机</span> : materials.length && primaryCount !== 1 ? '请选择一份 PPTX 主稿' : <span><span className="status-dot muted" />准备好后开始分析</span>}</div>
             <div className="footer-actions">{project && <button className="text-button" disabled={saving} onClick={() => { void api?.revealProject(project.id).catch((cause) => setError(String(cause))); }}><FolderOpen size={16} />项目目录</button>}<button className="secondary-action" disabled={!api || !canContinue || saving} onClick={() => createProject(false)}>保存项目</button><button className="primary-action" disabled={!api || !canContinue || saving} onClick={() => createProject(true)}>{saving ? <><LoaderCircle size={17} className="spin" />正在保存与分析</> : <>保存并分析材料 <ArrowRight size={17} /></>}</button></div>
           </footer>
+            </aside>
         </div>
       </section>
     </main>

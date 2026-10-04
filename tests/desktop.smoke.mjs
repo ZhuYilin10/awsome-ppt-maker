@@ -56,6 +56,21 @@ async function capture(filename) {
   const image = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
   await writeFile(resolve('.impeccable/review', filename), Buffer.from(image.data, 'base64'));
 }
+async function assertPinnedActions() {
+  const geometry = `(() => {
+    const rail = document.querySelector('.setup-aside').getBoundingClientRect();
+    const buttons = document.querySelector('.footer-actions').getBoundingClientRect();
+    return { railTop: rail.top, railBottom: rail.bottom, buttonsTop: buttons.top, buttonsBottom: buttons.bottom };
+  })()`;
+  const before = await evaluate(geometry);
+  assert.ok(before.buttonsTop >= 0 && before.buttonsBottom <= await evaluate('window.innerHeight'));
+  assert.equal(await evaluate("Boolean(document.querySelector('.setup-aside .action-bar'))"), true);
+  await evaluate("document.querySelector('.content-scroll').scrollTop = document.querySelector('.content-scroll').scrollHeight");
+  assert.ok(await evaluate("document.querySelector('.content-scroll').scrollTop > 0"));
+  assert.deepEqual(await evaluate(geometry), before);
+  assert.equal(await evaluate('document.documentElement.scrollHeight <= window.innerHeight'), true);
+  await evaluate("document.querySelector('.content-scroll').scrollTop = 0");
+}
 try {
   let page;
   const deadline = Date.now() + 30_000;
@@ -81,6 +96,8 @@ try {
   assert.equal(runtime.officecli.available, true);
   await clickText('设置');
   await waitFor("Boolean(document.querySelector('.settings-page'))");
+  assert.equal(await evaluate('document.documentElement.scrollHeight <= window.innerHeight'), true);
+  assert.equal(await evaluate("document.querySelector('.settings-page').scrollHeight > document.querySelector('.settings-page').clientHeight"), true);
   assert.equal(await evaluate("document.querySelector('.provider-choice strong').textContent"), 'OpenAI');
   assert.equal(await evaluate("document.querySelector('.settings-info').textContent.includes('reasoning.effort')"), true);
   await clickText('返回项目');
@@ -95,9 +112,11 @@ try {
   await fill('#project-name', '初始化测试项目');
   await fill('#project-brief', '内容完整保留；首页和 Logo 不动');
   await fill('.material-controls textarea', '这份是主稿，内容不删减');
+  await assertPinnedActions();
   await capture('desktop.png');
   await send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 760, deviceScaleFactor: 1, mobile: false });
   assert.equal(await evaluate('document.documentElement.scrollWidth <= 1000'), true);
+  await assertPinnedActions();
   await capture('desktop-compact.png');
   await clickText('保存并分析材料');
   await waitFor("Boolean(document.querySelector('.analysis-panel'))");
